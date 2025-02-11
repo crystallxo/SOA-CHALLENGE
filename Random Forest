@@ -14,7 +14,6 @@ data$Loss_gf_Prop[is.na(data$Loss_gf_Prop)] <- median(loss_prop_clean, na.rm = T
 # Median imputation for loss liab
 loss_liab_clean <- na.omit(data$Loss_gf_Liab)
 data$Loss_gf_Liab[is.na(data$Loss_gf_Liab)] <- median(loss_liab_clean, na.rm = TRUE)
-# ^ini kmrn di ref ada typo loss gf nya
 
 missing_rows <- data[!complete.cases(data), ]  # Show only rows with NA
 print(missing_rows)
@@ -39,10 +38,13 @@ test_data <- data[-train_index, ]
 
 # Train the Random Forest model
 set.seed(123)
+p <- ncol(train_data) - 1  # Number of predictors
+best_mtry <- floor(sqrt(p))  # Use sqrt(p) rule
+
 rf_model <- randomForest(as.formula(paste(target_variable, "~ .")), 
                          data = train_data, 
                          ntree = 100, 
-                         mtry = 3, 
+                         mtry = best_mtry, 
                          importance = TRUE)
 
 
@@ -73,13 +75,6 @@ train_rf_predictions <- predict(rf_model, train_data)
 train_rmse <- rmse(train_data$Total.loss, train_rf_predictions)
 train_r2 <- cor(train_data$Total.loss, train_rf_predictions)^2
 
-# Compute predictions on test data
-test_predictions <- predict(rf_model, test_data)
-
-# Compute RMSE and R² for test data
-test_rmse <- sqrt(mean((test_data$Loss_gf_Prop - test_predictions)^2))
-test_r2 <- cor(test_data$Loss_gf_Prop, test_predictions)^2
-
 # Print results
 cat("Training RMSE:", train_rmse, "\n")
 cat("Training R-squared:", train_r2, "\n")
@@ -87,3 +82,18 @@ cat("Test RMSE:", rmse, "\n")
 cat("Test R-squared:", r2, "\n")
 
 ############################################
+
+library(randomForest)
+
+# Run automatic tuning for mtry (number of features per split)
+best_mtry <- tuneRF(
+  x = train_data[ , !names(train_data) %in% "Total.loss"],  # Exclude target variable
+  y = train_data$Total.loss, 
+  stepFactor = 1.5,  # Expands search range
+  improve = 0.01,  # Stop if improvement is less than 1%
+  trace = TRUE  # Show progress
+)
+
+print(best_mtry)  # Best mtry value
+
+varImpPlot(rf_model)
