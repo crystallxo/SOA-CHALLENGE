@@ -1,0 +1,153 @@
+library(dplyr)
+library(randomForest)
+library(caret)
+library(Metrics)
+install.packages("")
+data = read.csv("C:/Users/user/OneDrive/Documents/A UPH/SOA STUDY CASE/dam-clean (2) - data.csv")
+data <- data %>%
+  select(-c(Loss_gf_Prop, Loss_gf_Liab, Loss_gf_BI)) 
+
+data$Region <- as.factor(data$Region)
+data$Purpose <- as.factor(data$Purpose)
+data$Hazard <- as.factor(data$Hazard)
+data$Assessment <- as.factor(data$Assessment)
+
+# Define the target variable (Loss Given Failure - Property)
+target_variable <- "Total.loss"  # Adjust if needed
+
+missing_rows <- data[!complete.cases(data), ]  # Show only rows with NA
+print(missing_rows)
+# setelah di cek, udah gada yg missing values lg
+
+# Create separate data frames for each region
+flumevale_df <- data %>% filter(Region == "Flumevale") 
+lyndrassia_df <- data %>% filter(Region == "Lyndrassia") 
+navaldia_df <- data %>% filter(Region == "Navaldia")
+
+##################################################################
+#FLUMVALE
+# Split data into training and testing sets
+set.seed(123)  # For reproducibility
+train_index <- createDataPartition(flumevale_df[[target_variable]], p = 0.7, list = FALSE)
+# createDataPartition() (from caret package) → Splits data randomly while ensuring class distribution remains similar.
+
+train_flumevale <- data[train_index, ]
+test_flumvale <- data[-train_index, ]
+
+p <- ncol(train_flumevale) - 1  # Number of predictors
+best_mtry <- floor(sqrt(p))  # Use sqrt(p) rule
+
+rf_model <- randomForest(as.formula(paste(target_variable, "~ .")), 
+                         data = flumevale_df, ntree = 100, mtry = best_mtry, importance=TRUE)
+
+#rf_model <- randomForest(as.formula(paste(target_variable, "~ .")), data = train_data, ntree = 100, mtry = best_mtry, importance = TRUE)
+
+
+# Evaluate model performance
+rf_predictions <- predict(rf_model, newdata = test_flumvale)
+
+true_values <- test_flumvale$Total.loss
+
+# Compute regression metrics
+mse <- mse(true_values, rf_predictions)
+rmse <- rmse(true_values, rf_predictions)
+mae <- mae(true_values, rf_predictions)
+r2 <- cor(true_values, rf_predictions)^2  # R-squared
+
+train_rf_predictions <- predict(rf_model, train_flumevale)
+
+# Compute RMSE and R² for training data
+train_rmse <- rmse(train_flumevale$Total.loss, train_rf_predictions)
+train_r2 <- cor(train_flumevale$Total.loss, train_rf_predictions)^2
+
+# Print results
+cat("Training RMSE:", train_rmse, "\n")
+cat("Training R-squared:", train_r2, "\n")
+cat("Test RMSE:", rmse, "\n")
+cat("Test R-squared:", r2, "\n")
+
+#####################################################################
+#lyndrassia
+# Split data into training and testing sets
+set.seed(123)  # For reproducibility
+train_index <- createDataPartition(lyndrassia_df[[target_variable]], p = 0.7, list = FALSE)
+# createDataPartition() (from caret package) → Splits data randomly while ensuring class distribution remains similar.
+
+train_lynd <- data[train_index, ]
+test_lynd <- data[-train_index, ]
+
+p <- ncol(train_lynd) - 1  # Number of predictors
+best_mtry <- floor(sqrt(p))  # Use sqrt(p) rule
+
+rf_model <- randomForest(as.formula(paste(target_variable, "~ .")), 
+                         data = lyndrassia_df, ntree = 100, mtry = best_mtry, importance=TRUE)
+
+#rf_model <- randomForest(as.formula(paste(target_variable, "~ .")), data = train_data, ntree = 100, mtry = best_mtry, importance = TRUE)
+
+
+# Evaluate model performance
+rf_predictions <- predict(rf_model, newdata = test_lynd)
+
+true_values <- test_lynd$Total.loss
+
+# Compute regression metrics
+mse <- mse(true_values, rf_predictions)
+rmse <- rmse(true_values, rf_predictions)
+mae <- mae(true_values, rf_predictions)
+r2 <- cor(true_values, rf_predictions)^2  # R-squared
+
+train_rf_predictions <- predict(rf_model, train_lynd)
+
+# Compute RMSE and R² for training data
+train_rmse <- rmse(train_lynd$Total.loss, train_rf_predictions)
+train_r2 <- cor(train_lynd$Total.loss, train_rf_predictions)^2
+
+# Print results
+cat("Training RMSE:", train_rmse, "\n")
+cat("Training R-squared:", train_r2, "\n")
+cat("Test RMSE:", rmse, "\n")
+cat("Test R-squared:", r2, "\n")
+
+#####################################################################
+# navaldia
+# Split data into training and testing sets
+set.seed(123)  # For reproducibility
+train_index <- createDataPartition(navaldia_df[[target_variable]], p = 0.7, list = FALSE)
+# createDataPartition() (from caret package) → Splits data randomly while ensuring class distribution remains similar.
+
+train_nav <- data[train_index, ]
+test_nav <- data[-train_index, ]
+
+p <- ncol(train_nav) - 1  # Number of predictors
+best_mtry <- floor(sqrt(p))  # Use sqrt(p) rule
+
+rf_model <- randomForest(as.formula(paste(target_variable, "~ .")), 
+                         data = navaldia_df, ntree = 100, mtry = best_mtry, importance=TRUE)
+
+#rf_model <- randomForest(as.formula(paste(target_variable, "~ .")), data = train_data, ntree = 100, mtry = best_mtry, importance = TRUE)
+
+
+# Evaluate model performance
+rf_predictions <- predict(rf_model, newdata = test_nav)
+
+true_values <- test_nav$Total.loss
+
+# Compute regression metrics
+mse <- mse(true_values, rf_predictions)
+rmse <- rmse(true_values, rf_predictions)
+mae <- mae(true_values, rf_predictions)
+r2 <- cor(true_values, rf_predictions)^2  # R-squared
+
+train_rf_predictions <- predict(rf_model, train_nav)
+
+# Compute RMSE and R² for training data
+train_rmse <- rmse(train_nav$Total.loss, train_rf_predictions)
+train_r2 <- cor(train_nav$Total.loss, train_rf_predictions)^2
+
+# Print results
+cat("Training RMSE:", train_rmse, "\n")
+cat("Training R-squared:", train_r2, "\n")
+cat("Test RMSE:", rmse, "\n")
+cat("Test R-squared:", r2, "\n")
+
+
