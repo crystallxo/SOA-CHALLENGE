@@ -41,11 +41,13 @@ set.seed(123)
 p <- ncol(train_data) - 1  # Number of predictors
 best_mtry <- floor(sqrt(p))  # Use sqrt(p) rule
 
+predictors <- data %>%
+  select(-c(Loss_gf_Prop, Loss_gf_Liab, Loss_gf_BI))
+
 rf_model <- randomForest(as.formula(paste(target_variable, "~ .")), 
-                         data = train_data, 
-                         ntree = 100, 
-                         mtry = best_mtry, 
-                         importance = TRUE)
+                         data = predictors, ntree = 100, mtry = best_mtry, importance=TRUE)
+
+#rf_model <- randomForest(as.formula(paste(target_variable, "~ .")), data = train_data, ntree = 100, mtry = best_mtry, importance = TRUE)
 
 
 # Evaluate model performance
@@ -69,6 +71,9 @@ cat("R-squared:", r2, "\n")
 
 #compare hasil for testing and training, utk melihat ada overfitting ga
 # Compute predictions on training data
+
+train_data <- 
+
 train_rf_predictions <- predict(rf_model, train_data)
 
 # Compute RMSE and R² for training data
