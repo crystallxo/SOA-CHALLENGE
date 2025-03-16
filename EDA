@@ -1,0 +1,171 @@
+dam=read.csv("dam-clean (1).csv")
+new_data=read.csv("dam-data.csv")
+dam<- cbind(dam, new_data$ID)
+summary(dam)
+library(ggplot2)
+library(gridExtra)
+
+# Create individual plots
+p1 <- ggplot(dam, aes(x = Region)) +
+  geom_bar(fill = "steelblue") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Dams by Region")
+
+# Create a simpler pie chart for dam purposes
+# Create pie chart with smaller legend
+p2 <- ggplot(dam, aes(x = "", fill = Purpose)) +
+  geom_bar(width = 1) +
+  coord_polar("y") +
+  theme_minimal() +
+  labs(title = "Dams by Purpose") +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        legend.key.size = unit(0.3, 'cm'),    # Make legend keys smaller
+        legend.text = element_text(size = 6),  # Make legend text smaller
+        legend.title = element_text(size = 7), # Make legend title smaller
+        legend.position = "right",             # Keep legend on the right
+        plot.title = element_text(size = 10, face = "bold"))  # Adjust title size
+
+# Combine with other plots
+grid.arrange(p1, p3, p4, ncol = 2)
+p3 <- ggplot(dam, aes(x = Hazard)) +
+  geom_bar(fill = "steelblue") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Dams by Hazard")
+
+p4 <- ggplot(dam, aes(x = Assessment)) +
+  geom_bar(fill = "steelblue") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Dams by Assessment")
+
+# Combine plots
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+
+# Height distribution with zoomed left side
+p5 <- ggplot(dam, aes(x = Height)) +
+  geom_histogram(fill = "steelblue", color = "black", binwidth = 1) +
+  theme_minimal() +
+  labs(title = "Count of Dams by Height",
+       x = "Height",
+       y = "Count of Dams") +
+  theme(plot.title = element_text(face = "bold")) +
+  xlim(0, quantile(dam$Height, 0.95)) +
+  scale_x_continuous(expand = c(0, 0))
+
+# Length distribution with zoomed left side
+p6 <- ggplot(dam, aes(x = Length)) +
+  geom_histogram(fill = "steelblue", color = "black", binwidth = 1) +
+  theme_minimal() +
+  labs(title = "Count of Dams by Length",
+       x = "Length",
+       y = "Count of Dams") +
+  theme(plot.title = element_text(face = "bold")) +
+  xlim(0, quantile(dam$Length, 0.95)) +
+  scale_x_continuous(expand = c(0, 0))
+
+# First, let's check the range of Volume data
+summary(dam$Volume)
+
+# Corrected Volume plot with better visualization
+p7 <- ggplot(dam, aes(x = Volume)) +
+  geom_histogram(fill = "steelblue", color = "black", bins = 50) +
+  theme_minimal() +
+  labs(title = "Count of Dams by Volume",
+       x = "Volume",
+       y = "Count of Dams") +
+  theme(plot.title = element_text(face = "bold")) +
+  coord_cartesian(xlim = c(0, quantile(dam$Volume, 0.90, na.rm = TRUE))) + # Show up to 90th percentile
+  scale_y_continuous(expand = c(0, 0)) +
+  theme(
+    axis.text = element_text(size = 8),
+    axis.title = element_text(size = 10)
+  )
+
+# Alternative version if the above still doesn't look good:
+p7 <- ggplot(dam, aes(x = Volume)) +
+  geom_histogram(fill = "steelblue", color = "black", binwidth = 1000) +
+  theme_minimal() +
+  labs(title = "Count of Dams by Volume",
+       x = "Volume",
+       y = "Count of Dams") +
+  theme(plot.title = element_text(face = "bold")) +
+  scale_x_continuous(labels = scales::comma) + # Format large numbers with commas
+  coord_cartesian(xlim = c(0, quantile(dam$Volume, 0.85, na.rm = TRUE))) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text = element_text(size = 8),
+    axis.title = element_text(size = 10)
+  )
+
+# Combine with other plots
+grid.arrange(p5, p6, p7, p8, ncol = 2)
+
+# Year Completed distribution
+p8 <- ggplot(dam, aes(x = Year_Completed)) +
+  geom_histogram(fill = "steelblue", color = "black", bins = 30) +
+  theme_minimal() +
+  labs(title = "Count of Dams by Year Completed",
+       x = "Year Completed",
+       y = "Count of Dams") +
+  theme(plot.title = element_text(face = "bold"))
+
+# Combine plots
+grid.arrange(p5, p6, p7, p8, ncol = 2)
+# For risk-related variables
+p9 <- ggplot(dam, aes(x = Prob_Fail)) +
+  geom_histogram(fill = "steelblue", bins = 30) +
+  theme_minimal() +
+  labs(title = "Distribution of Failure Probability")
+
+# Calculate Total Loss and add it as a new column
+dam$Total_Loss <- dam$Loss_gf_Liab + dam$Loss_gf_Prop + dam$Loss_gf_BI
+
+# Create visualizations for Total Loss distribution
+p10<- ggplot(dam, aes(x = Total_Loss)) +
+  geom_histogram(fill = "steelblue", color = "black", bins = 30) +
+  theme_minimal() +
+  labs(title = "Distribution of Total Loss",
+       x = "Total Loss",
+       y = "Count") +
+  theme(plot.title = element_text(face = "bold"))
+grid.arrange(p9,p10, ncol = 2)
+# 1. Hazard vs Failure Probability
+# Create boxplot
+hazard_fail <- ggplot(dam, aes(x = Hazard, y = Prob_Fail)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Hazard Level vs Failure Probability",
+       x = "Hazard Level",
+       y = "Failure Probability") +
+  theme(plot.title = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+# 2. Dam Surface vs Total Loss
+# First, calculate total loss (sum of all loss types)
+dam$Total_Loss <- dam$Loss_gf_Liab + dam$Loss_gf_Prop + dam$Loss_gf_BI
+
+# Create scatter plot
+surface_loss <- ggplot(dam, aes(x = Surface, y = Total_Loss)) +
+  geom_point(color = "steelblue", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +  # Add trend line
+  theme_minimal() +
+  labs(title = "Dam Surface Area vs Total Loss",
+       x = "Surface Area",
+       y = "Total Loss") +
+  theme(plot.title = element_text(face = "bold"))
+
+# Combine plots
+grid.arrange(hazard_fail, surface_loss, ncol = 2)
+
+# Optional: Add statistical tests
+# For Hazard vs Failure Probability
+hazard_test <- aov(Prob_Fail ~ Hazard, data = dam)
+summary(hazard_test)
+
+# For Surface vs Total Loss
+correlation <- cor.test(dam$Surface, dam$Total_Loss)
+print(correlation)
