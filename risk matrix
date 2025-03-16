@@ -1,0 +1,32 @@
+# Load required library
+library(ggplot2)
+
+# Create risk data (Likelihood, Impact, Label, Description)
+risk_data <- data.frame(
+  Likelihood = c(4, 3, 2, 5, 3, 4, 2, 5),
+  Impact = c(5, 4, 3, 5, 3, 4, 4, 3),
+  Label = c("1", "2", "3", "4", "5", "6", "7", "8"),
+  Description = c(
+    "Moral Hazard Risk", "Pricing Risk", "Data Limitations Risk",
+    "Catastrophic Loss Risk", "Regulatory & Legal Risk", 
+    "Climate Change Risk", "Structural Integrity Risk", "Cybersecurity Risk"
+  )
+)
+
+# Create the Risk Matrix plot with a legend
+ggplot(risk_data, aes(x = Likelihood, y = Impact, label = Label, fill = Description)) +
+  geom_point(size = 6, shape = 21, color = "black", stroke = 1) +  # Circles with a black border
+  geom_text(color = "white", size = 4, fontface = "bold") +  # Numbers inside circles
+  scale_x_continuous(breaks = 1:5, limits = c(0.5, 5.5)) +  # X-axis (Likelihood)
+  scale_y_continuous(breaks = 1:5, limits = c(0.5, 5.5)) +  # Y-axis (Impact)
+  labs(title = "Risk Matrix for Dam Insurance", x = "Likelihood", y = "Impact", fill = "Risk Type") +
+  geom_vline(xintercept = 3, linetype = "dashed", color = "black") +  # Vertical quadrant line
+  geom_hline(yintercept = 3, linetype = "dashed", color = "black") +  # Horizontal quadrant line
+  scale_fill_manual(values = c("Moral Hazard Risk" = "blue", "Pricing Risk" = "red", 
+                               "Data Limitations Risk" = "green", "Catastrophic Loss Risk" = "purple",
+                               "Regulatory & Legal Risk" = "orange", "Climate Change Risk" = "brown",
+                               "Structural Integrity Risk" = "pink", "Cybersecurity Risk" = "cyan")) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = "right")  # Legend placed on the right
+
