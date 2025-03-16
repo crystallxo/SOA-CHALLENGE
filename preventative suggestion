@@ -1,0 +1,894 @@
+library(dplyr)
+library(tidyr)
+#harus dirun pisah pisah
+# Load data
+data <- read.csv("D:/downloads/dam-clean (2) - dam-clean (2).csv")
+summary(data)
+# Calculate Age
+data$Age <- 2025 - data$Year_Completed
+
+# Impute missing values
+data <- data %>%
+  mutate(across(c(Loss_gf_Prop, Loss_gf_Liab, Loss_gf_BI), ~ifelse(is.na(.), median(., na.rm = TRUE), .)))
+
+# Ensure no NAs remain
+stopifnot(sum(is.na(data$Loss_gf_Prop)) == 0)
+stopifnot(sum(is.na(data$Loss_gf_Liab)) == 0)
+stopifnot(sum(is.na(data$Loss_gf_BI)) == 0)
+
+# Compute Total Loss
+data$Total_Loss <- data$Loss_gf_Prop + data$Loss_gf_Liab + data$Loss_gf_BI
+data$Region
+
+# Load necessary libraries
+library(dplyr)
+
+
+data$Prob_1y <- 1 - (1-data$Prob_Fail)^(1/10)
+
+navaldia <- data %>% filter(Region == "Navaldia")
+Lyndrassia <- data %>% filter(Region == "Lyndrassia")
+flumvale <- data %>% filter(Region == "Flumevale")
+#10% maintenance 25% rcc 10% coastal
+navaldia$Prob_1y<-(1-0.1)*(1-0.1)*navaldia$Prob_1y
+Lyndrassia$Prob_1y<-(1-0.25)*(1-0.1)*Lyndrassia$Prob_1y
+flumvale$Prob_1y<-(1-0.25)*(1-0.1)*flumvale$Prob_1y
+
+#Convert categorical variables to factors
+navaldia$Region <- as.factor(navaldia$Region)
+navaldia$Purpose <- as.factor(navaldia$Purpose)
+navaldia$Hazard <- as.factor(navaldia$Hazard)
+navaldia$Assessment <- as.factor(navaldia$Assessment)
+
+n_simulations <- 1000 # Simulations per trial (for loss values)
+n_trials <- 100 # Number of times we estimate the 95th percentile
+
+#Group dams by region and hazard level
+grouped_data <- navaldia %>%
+  group_by(Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y), # Store probabilities as list
+    loss_given_fail = list(Total.loss), # Store losses as list
+    .groups = 'drop'
+  )
+
+#Function to run one trial of Monte Carlo simulation
+simulate_95th_percentile_trial <- function(prob_fail, loss_given_fail, n_sim) {
+  sim_losses <- numeric(n_sim) # Store total loss for each simulation
+  
+  for (sim in 1:n_sim) {
+    failures <- rbinom(length(prob_fail), size = 1, prob = prob_fail) # Simulate failures (1 = fail, 0 = no fail)
+    total_loss <- sum(failures * loss_given_fail) # Compute total loss for the region-hazard level
+    sim_losses[sim] <- total_loss
+  }
+  
+  return(quantile(sim_losses, 0.95, na.rm = TRUE)) # Return the 95th percentile of total loss
+}
+
+#Apply Monte Carlo simulation to each region-hazard group
+grouped_data$trials_95th <- lapply(1:nrow(grouped_data), function(i) {
+  prob_fail <- unlist(grouped_data$prob_fail[i]) # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data$loss_given_fail[i]) # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+#Compute the mean of the 95th percentiles across trials for each region-hazard group
+grouped_data$xbar_95th <- sapply(grouped_data$trials_95th, mean, na.rm = TRUE)
+
+#Function to perform normality tests for each region-hazard group
+perform_normality_tests <- function( hazard, values) {
+  cat("\nNormality Test for Region:", region, "| Hazard Level:", hazard, "\n")
+  
+  #Shapiro-Wilk test
+  shapiro_result <- shapiro.test(values)
+  print(shapiro_result)
+  
+  #Q-Q plot
+  qqnorm(values, main = paste("Q-Q Plot:", region, "-", hazard))
+  qqline(values, col = "red")
+}
+
+#Ensure region and hazard level are character values
+grouped_data$Region <- as.character(grouped_data$Region)
+grouped_data$Hazard <- as.character(grouped_data$Hazard)
+
+#Apply normality test to each region-hazard level
+for (i in 1:nrow(grouped_data)) {
+  perform_normality_tests(
+    grouped_data$Region[i],
+    grouped_data$Hazard[i],
+    grouped_data$trials_95th[[i]] # 100 values of the 95th percentile
+  )
+}
+
+#View results
+head(grouped_data[, c( "Hazard", "xbar_95th")])
+
+#Load necessary library
+library(dplyr)
+
+#Convert categorical variables to factors
+flumvale$Region <- as.factor(flumvale$Region)
+flumvale$Purpose <- as.factor(flumvale$Purpose)
+flumvale$Hazard <- as.factor(flumvale$Hazard)
+flumvale$Assessment <- as.factor(flumvale$Assessment)
+
+Lyndrassia$Region <- as.factor(Lyndrassia$Region)
+Lyndrassia$Purpose <- as.factor(Lyndrassia$Purpose)
+Lyndrassia$Hazard <- as.factor(Lyndrassia$Hazard)
+Lyndrassia$Assessment <- as.factor(Lyndrassia$Assessment)
+
+
+
+#Group dams by region and hazard level for flumvale
+grouped_data_flumvale <- flumvale %>%
+  group_by(Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y), # Store probabilities as list
+    loss_given_fail = list(Total.loss), # Store losses as list
+    .groups = 'drop'
+  )
+
+#Group dams by region and hazard level for Lyndrassia
+grouped_data_Lyndrassia <- Lyndrassia %>%
+  group_by(Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y), # Store probabilities as list
+    loss_given_fail = list(Total.loss), # Store losses as list
+    .groups = 'drop'
+  )
+
+#Function to run one trial of Monte Carlo simulation
+simulate_95th_percentile_trial <- function(prob_fail, loss_given_fail, n_sim) {
+  sim_losses <- numeric(n_sim) # Store total loss for each simulation
+  
+  for (sim in 1:n_sim) {
+    failures <- rbinom(length(prob_fail), size = 1, prob = prob_fail) # Simulate failures (1 = fail, 0 = no fail)
+    total_loss <- sum(failures * loss_given_fail) # Compute total loss for the region-hazard level
+    sim_losses[sim] <- total_loss
+  }
+  
+  return(quantile(sim_losses, 0.95, na.rm = TRUE)) # Return the 95th percentile of total loss
+}
+
+#Apply Monte Carlo simulation to each region-hazard group for flumvale
+grouped_data_flumvale$trials_95th <- lapply(1:nrow(grouped_data_flumvale), function(i) {
+  prob_fail <- unlist(grouped_data_flumvale$prob_fail[i]) # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data_flumvale$loss_given_fail[i]) # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+#Apply Monte Carlo simulation to each region-hazard group for Lyndrassia
+grouped_data_Lyndrassia$trials_95th <- lapply(1:nrow(grouped_data_Lyndrassia), function(i) {
+  prob_fail <- unlist(grouped_data_Lyndrassia$prob_fail[i]) # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data_Lyndrassia$loss_given_fail[i]) # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+#Compute the mean of the 95th percentiles across trials for each region-hazard group for flumvale
+grouped_data_flumvale$xbar_95th <- sapply(grouped_data_flumvale$trials_95th, mean, na.rm = TRUE)
+
+#Compute the mean of the 95th percentiles across trials for each region-hazard group for Lyndrassia
+grouped_data_Lyndrassia$xbar_95th <- sapply(grouped_data_Lyndrassia$trials_95th, mean, na.rm = TRUE)
+
+#Function to perform normality tests for each region-hazard group
+perform_normality_tests <- function(region, hazard, values) {
+  cat("\nNormality Test for Region:", region, "| Hazard Level:", hazard, "\n")
+  
+  #Shapiro-Wilk test
+  shapiro_result <- shapiro.test(values)
+  print(shapiro_result)
+  
+  #Q-Q plot
+  qqnorm(values, main = paste("Q-Q Plot:", region, "-", hazard))
+  qqline(values, col = "red")
+}
+
+#Ensure region and hazard level are character values for flumvale
+grouped_data_flumvale$Region <- as.character(grouped_data_flumvale$Region)
+grouped_data_flumvale$Hazard <- as.character(grouped_data_flumvale$Hazard)
+
+#Ensure region and hazard level are character values for Lyndrassia
+grouped_data_Lyndrassia$Region <- as.character(grouped_data_Lyndrassia$Region)
+grouped_data_Lyndrassia$Hazard <- as.character(grouped_data_Lyndrassia$Hazard)
+
+#Apply normality test to each region-hazard level for flumvale
+for (i in 1:nrow(grouped_data_flumvale)) {
+  perform_normality_tests(
+    "flumvale",
+    grouped_data_flumvale$Hazard[i],
+    grouped_data_flumvale$trials_95th[[i]] # 100 values of the 95th percentile
+  )
+}
+
+#Apply normality test to each region-hazard level for Lyndrassia
+for (i in 1:nrow(grouped_data_Lyndrassia)) {
+  perform_normality_tests(
+    "Lyndrassia",
+    grouped_data_Lyndrassia$Hazard[i],
+    grouped_data_Lyndrassia$trials_95th[[i]] # 100 values of the 95th percentile
+  )
+}
+
+#View results for flumvale
+head(grouped_data_flumvale[, c("Hazard", "xbar_95th")])
+
+#View results for Lyndrassia
+head(grouped_data_Lyndrassia[, c("Hazard", "xbar_95th")])
+
+##############################################################
+
+#Step 1: Compute Total Premium per Region-Hazard Level
+inflation_rate =0.02530526
+discount_rate =0.04943952
+#for navaldia
+grouped_data$Total_Premium <- (grouped_data$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+#For flumvale
+grouped_data_flumvale$Total_Premium <- (grouped_data_flumvale$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+#For Lyndrassia
+grouped_data_Lyndrassia$Total_Premium <- (grouped_data_Lyndrassia$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+#Step 2: Calculate Expected Loss for Each Dam
+navaldia$Expected_Loss <- navaldia$Prob_1y * navaldia$Total.loss
+flumvale$Expected_Loss <- flumvale$Prob_1y * flumvale$Total.loss
+Lyndrassia$Expected_Loss <- Lyndrassia$Prob_1y * Lyndrassia$Total.loss
+navaldia <- merge(navaldia, grouped_data[, c( "Hazard", "Total_Premium")], by = c( "Hazard"))
+
+#Merge region-hazard-level premium into the dam-level dataset for flumvale
+flumvale <- merge(flumvale, grouped_data_flumvale[, c( "Hazard", "Total_Premium")], by = c( "Hazard"))
+
+#Merge region-hazard-level premium into the dam-level dataset for Lyndrassia
+Lyndrassia <- merge(Lyndrassia, grouped_data_Lyndrassia[, c( "Hazard", "Total_Premium")], by = c( "Hazard"))
+
+#Step 3: Compute Total Expected Loss per Region-Hazard Level
+total_expected_loss_navaldia <- aggregate(Expected_Loss ~ Region + Hazard, navaldia, sum)
+colnames(total_expected_loss_navaldia)[3] <- "Total_Expected_Loss"
+
+total_expected_loss_flumvale <- aggregate(Expected_Loss ~ Region + Hazard, flumvale, sum)
+colnames(total_expected_loss_flumvale)[3] <- "Total_Expected_Loss"
+
+total_expected_loss_Lyndrassia <- aggregate(Expected_Loss ~ Region + Hazard, Lyndrassia, sum)
+colnames(total_expected_loss_Lyndrassia)[3] <- "Total_Expected_Loss"
+navaldia <- merge(navaldia, total_expected_loss_navaldia, by = c("Region", "Hazard"))
+
+#Merge total expected loss back into dam_data for flumvale
+flumvale <- merge(flumvale, total_expected_loss_flumvale, by = c("Region", "Hazard"))
+
+#Merge total expected loss back into dam_data for Lyndrassia
+Lyndrassia <- merge(Lyndrassia, total_expected_loss_Lyndrassia, by = c("Region", "Hazard"))
+
+#Step 4: Allocate Premium per Dam Based on Risk Contribution
+navaldia$Premium_per_Dam <- (navaldia$Expected_Loss / navaldia$Total_Expected_Loss) * navaldia$Total_Premium
+flumvale$Premium_per_Dam <- (flumvale$Expected_Loss / flumvale$Total_Expected_Loss) * flumvale$Total_Premium
+Lyndrassia$Premium_per_Dam <- (Lyndrassia$Expected_Loss / Lyndrassia$Total_Expected_Loss) * Lyndrassia$Total_Premium
+
+head(navaldia[, c( "Hazard", "Premium_per_Dam")])
+
+#View final premium allocation for flumvale
+head(flumvale[, c( "Hazard", "Premium_per_Dam")])
+
+#View final premium allocation for Lyndrassia
+head(Lyndrassia[, c( "Hazard", "Premium_per_Dam")])
+
+#Combine all regions into one dataframe
+all_regions <- rbind(navaldia, flumvale, Lyndrassia)
+
+#Calculate total premium across all regions
+total_premium_all_regions <- sum(all_regions$Premium_per_Dam)
+
+#View total premium
+cat("Total Premium Across All Regions:", total_premium_all_regions, "\n")
+
+#Calculate total premium per region
+premium_per_region <- aggregate(Premium_per_Dam ~ Region, all_regions, sum)
+
+#Rename the column for clarity
+colnames(premium_per_region)[2] <- "Total_Premium"
+
+#View the results
+print(premium_per_region)
+
+# Pie Chart
+pie_plot <- ggplot(premium_per_region, aes(x = "", y = Percentage, fill = Region)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y", start = 0) +
+  labs(
+    title = "Premium Contribution Percentage by Region",
+    fill = "Region"
+  ) +
+  theme_void() +
+  geom_text(
+    aes(label = paste0(round(Percentage, 1), "%")),
+    position = position_stack(vjust = 0.5)
+  ) +
+  scale_fill_brewer(palette = "Set2")
+# Print the premium details
+print(premium_per_region)
+
+# Arrange and display plots
+library(gridExtra)
+grid.arrange(bar_plot, pie_plot, ncol = 2)
+#----------------------------------------------------------------------
+#12.5% maintenance 26.5% rcc 12.5% coastal
+navaldia$Prob_1y<-(1-0.125)*(1-0.125)*navaldia$Prob_1y
+Lyndrassia$Prob_1y<-(1-0.265)*(1-0.125)*Lyndrassia$Prob_1y
+flumvale$Prob_1y<-(1-0.265)*(1-0.125)*flumvale$Prob_1y
+
+#Convert categorical variables to factors
+navaldia$Region <- as.factor(navaldia$Region)
+navaldia$Purpose <- as.factor(navaldia$Purpose)
+navaldia$Hazard <- as.factor(navaldia$Hazard)
+navaldia$Assessment <- as.factor(navaldia$Assessment)
+
+n_simulations <- 1000 # Simulations per trial (for loss values)
+n_trials <- 100 # Number of times we estimate the 95th percentile
+
+#Group dams by region and hazard level
+grouped_data <- navaldia %>%
+  group_by(Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y), # Store probabilities as list
+    loss_given_fail = list(Total.loss), # Store losses as list
+    .groups = 'drop'
+  )
+
+#Function to run one trial of Monte Carlo simulation
+simulate_95th_percentile_trial <- function(prob_fail, loss_given_fail, n_sim) {
+  sim_losses <- numeric(n_sim) # Store total loss for each simulation
+  
+  for (sim in 1:n_sim) {
+    failures <- rbinom(length(prob_fail), size = 1, prob = prob_fail) # Simulate failures (1 = fail, 0 = no fail)
+    total_loss <- sum(failures * loss_given_fail) # Compute total loss for the region-hazard level
+    sim_losses[sim] <- total_loss
+  }
+  
+  return(quantile(sim_losses, 0.95, na.rm = TRUE)) # Return the 95th percentile of total loss
+}
+
+#Apply Monte Carlo simulation to each region-hazard group
+grouped_data$trials_95th <- lapply(1:nrow(grouped_data), function(i) {
+  prob_fail <- unlist(grouped_data$prob_fail[i]) # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data$loss_given_fail[i]) # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+#Compute the mean of the 95th percentiles across trials for each region-hazard group
+grouped_data$xbar_95th <- sapply(grouped_data$trials_95th, mean, na.rm = TRUE)
+
+#Function to perform normality tests for each region-hazard group
+perform_normality_tests <- function( hazard, values) {
+  cat("\nNormality Test for Region:", region, "| Hazard Level:", hazard, "\n")
+  
+  #Shapiro-Wilk test
+  shapiro_result <- shapiro.test(values)
+  print(shapiro_result)
+  
+  #Q-Q plot
+  qqnorm(values, main = paste("Q-Q Plot:", region, "-", hazard))
+  qqline(values, col = "red")
+}
+
+#Ensure region and hazard level are character values
+grouped_data$Region <- as.character(grouped_data$Region)
+grouped_data$Hazard <- as.character(grouped_data$Hazard)
+
+#Apply normality test to each region-hazard level
+for (i in 1:nrow(grouped_data)) {
+  perform_normality_tests(
+    grouped_data$Region[i],
+    grouped_data$Hazard[i],
+    grouped_data$trials_95th[[i]] # 100 values of the 95th percentile
+  )
+}
+
+#View results
+head(grouped_data[, c( "Hazard", "xbar_95th")])
+
+#Load necessary library
+library(dplyr)
+
+#Convert categorical variables to factors
+flumvale$Region <- as.factor(flumvale$Region)
+flumvale$Purpose <- as.factor(flumvale$Purpose)
+flumvale$Hazard <- as.factor(flumvale$Hazard)
+flumvale$Assessment <- as.factor(flumvale$Assessment)
+
+Lyndrassia$Region <- as.factor(Lyndrassia$Region)
+Lyndrassia$Purpose <- as.factor(Lyndrassia$Purpose)
+Lyndrassia$Hazard <- as.factor(Lyndrassia$Hazard)
+Lyndrassia$Assessment <- as.factor(Lyndrassia$Assessment)
+
+
+
+#Group dams by region and hazard level for flumvale
+grouped_data_flumvale <- flumvale %>%
+  group_by(Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y), # Store probabilities as list
+    loss_given_fail = list(Total.loss), # Store losses as list
+    .groups = 'drop'
+  )
+
+#Group dams by region and hazard level for Lyndrassia
+grouped_data_Lyndrassia <- Lyndrassia %>%
+  group_by(Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y), # Store probabilities as list
+    loss_given_fail = list(Total.loss), # Store losses as list
+    .groups = 'drop'
+  )
+
+#Function to run one trial of Monte Carlo simulation
+simulate_95th_percentile_trial <- function(prob_fail, loss_given_fail, n_sim) {
+  sim_losses <- numeric(n_sim) # Store total loss for each simulation
+  
+  for (sim in 1:n_sim) {
+    failures <- rbinom(length(prob_fail), size = 1, prob = prob_fail) # Simulate failures (1 = fail, 0 = no fail)
+    total_loss <- sum(failures * loss_given_fail) # Compute total loss for the region-hazard level
+    sim_losses[sim] <- total_loss
+  }
+  
+  return(quantile(sim_losses, 0.95, na.rm = TRUE)) # Return the 95th percentile of total loss
+}
+
+#Apply Monte Carlo simulation to each region-hazard group for flumvale
+grouped_data_flumvale$trials_95th <- lapply(1:nrow(grouped_data_flumvale), function(i) {
+  prob_fail <- unlist(grouped_data_flumvale$prob_fail[i]) # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data_flumvale$loss_given_fail[i]) # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+#Apply Monte Carlo simulation to each region-hazard group for Lyndrassia
+grouped_data_Lyndrassia$trials_95th <- lapply(1:nrow(grouped_data_Lyndrassia), function(i) {
+  prob_fail <- unlist(grouped_data_Lyndrassia$prob_fail[i]) # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data_Lyndrassia$loss_given_fail[i]) # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+#Compute the mean of the 95th percentiles across trials for each region-hazard group for flumvale
+grouped_data_flumvale$xbar_95th <- sapply(grouped_data_flumvale$trials_95th, mean, na.rm = TRUE)
+
+#Compute the mean of the 95th percentiles across trials for each region-hazard group for Lyndrassia
+grouped_data_Lyndrassia$xbar_95th <- sapply(grouped_data_Lyndrassia$trials_95th, mean, na.rm = TRUE)
+
+#Function to perform normality tests for each region-hazard group
+perform_normality_tests <- function(region, hazard, values) {
+  cat("\nNormality Test for Region:", region, "| Hazard Level:", hazard, "\n")
+  
+  #Shapiro-Wilk test
+  shapiro_result <- shapiro.test(values)
+  print(shapiro_result)
+  
+  #Q-Q plot
+  qqnorm(values, main = paste("Q-Q Plot:", region, "-", hazard))
+  qqline(values, col = "red")
+}
+
+#Ensure region and hazard level are character values for flumvale
+grouped_data_flumvale$Region <- as.character(grouped_data_flumvale$Region)
+grouped_data_flumvale$Hazard <- as.character(grouped_data_flumvale$Hazard)
+
+#Ensure region and hazard level are character values for Lyndrassia
+grouped_data_Lyndrassia$Region <- as.character(grouped_data_Lyndrassia$Region)
+grouped_data_Lyndrassia$Hazard <- as.character(grouped_data_Lyndrassia$Hazard)
+
+#Apply normality test to each region-hazard level for flumvale
+for (i in 1:nrow(grouped_data_flumvale)) {
+  perform_normality_tests(
+    "flumvale",
+    grouped_data_flumvale$Hazard[i],
+    grouped_data_flumvale$trials_95th[[i]] # 100 values of the 95th percentile
+  )
+}
+
+#Apply normality test to each region-hazard level for Lyndrassia
+for (i in 1:nrow(grouped_data_Lyndrassia)) {
+  perform_normality_tests(
+    "Lyndrassia",
+    grouped_data_Lyndrassia$Hazard[i],
+    grouped_data_Lyndrassia$trials_95th[[i]] # 100 values of the 95th percentile
+  )
+}
+
+#View results for flumvale
+head(grouped_data_flumvale[, c("Hazard", "xbar_95th")])
+
+#View results for Lyndrassia
+head(grouped_data_Lyndrassia[, c("Hazard", "xbar_95th")])
+
+##############################################################
+
+#Step 1: Compute Total Premium per Region-Hazard Level
+inflation_rate = 0.02530526
+discount_rate = 0.04943952
+#for navaldia
+grouped_data$Total_Premium <- (grouped_data$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+#For flumvale
+grouped_data_flumvale$Total_Premium <- (grouped_data_flumvale$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+#For Lyndrassia
+grouped_data_Lyndrassia$Total_Premium <- (grouped_data_Lyndrassia$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+#Step 2: Calculate Expected Loss for Each Dam
+navaldia$Expected_Loss <- navaldia$Prob_1y * navaldia$Total.loss
+flumvale$Expected_Loss <- flumvale$Prob_1y * flumvale$Total.loss
+Lyndrassia$Expected_Loss <- Lyndrassia$Prob_1y * Lyndrassia$Total.loss
+navaldia <- merge(navaldia, grouped_data[, c( "Hazard", "Total_Premium")], by = c( "Hazard"))
+
+#Merge region-hazard-level premium into the dam-level dataset for flumvale
+flumvale <- merge(flumvale, grouped_data_flumvale[, c( "Hazard", "Total_Premium")], by = c( "Hazard"))
+
+#Merge region-hazard-level premium into the dam-level dataset for Lyndrassia
+Lyndrassia <- merge(Lyndrassia, grouped_data_Lyndrassia[, c( "Hazard", "Total_Premium")], by = c( "Hazard"))
+
+#Step 3: Compute Total Expected Loss per Region-Hazard Level
+total_expected_loss_navaldia <- aggregate(Expected_Loss ~ Region + Hazard, navaldia, sum)
+colnames(total_expected_loss_navaldia)[3] <- "Total_Expected_Loss"
+
+total_expected_loss_flumvale <- aggregate(Expected_Loss ~ Region + Hazard, flumvale, sum)
+colnames(total_expected_loss_flumvale)[3] <- "Total_Expected_Loss"
+
+total_expected_loss_Lyndrassia <- aggregate(Expected_Loss ~ Region + Hazard, Lyndrassia, sum)
+colnames(total_expected_loss_Lyndrassia)[3] <- "Total_Expected_Loss"
+navaldia <- merge(navaldia, total_expected_loss_navaldia, by = c("Region", "Hazard"))
+
+#Merge total expected loss back into dam_data for flumvale
+flumvale <- merge(flumvale, total_expected_loss_flumvale, by = c("Region", "Hazard"))
+
+#Merge total expected loss back into dam_data for Lyndrassia
+Lyndrassia <- merge(Lyndrassia, total_expected_loss_Lyndrassia, by = c("Region", "Hazard"))
+
+#Step 4: Allocate Premium per Dam Based on Risk Contribution
+navaldia$Premium_per_Dam <- (navaldia$Expected_Loss / navaldia$Total_Expected_Loss) * navaldia$Total_Premium
+flumvale$Premium_per_Dam <- (flumvale$Expected_Loss / flumvale$Total_Expected_Loss) * flumvale$Total_Premium
+Lyndrassia$Premium_per_Dam <- (Lyndrassia$Expected_Loss / Lyndrassia$Total_Expected_Loss) * Lyndrassia$Total_Premium
+
+head(navaldia[, c( "Hazard", "Premium_per_Dam")])
+
+#View final premium allocation for flumvale
+head(flumvale[, c( "Hazard", "Premium_per_Dam")])
+
+#View final premium allocation for Lyndrassia
+head(Lyndrassia[, c( "Hazard", "Premium_per_Dam")])
+
+#Combine all regions into one dataframe
+all_regions <- rbind(navaldia, flumvale, Lyndrassia)
+
+#Calculate total premium across all regions
+total_premium_all_regions <- sum(all_regions$Premium_per_Dam)
+
+#View total premium
+cat("Total Premium Across All Regions:", total_premium_all_regions, "\n")
+
+#Calculate total premium per region
+premium_per_region <- aggregate(Premium_per_Dam ~ Region, all_regions, sum)
+
+#Rename the column for clarity
+colnames(premium_per_region)[2] <- "Total_Premium"
+
+#View the results
+print(premium_per_region)
+
+# Pie Chart
+pie_plot <- ggplot(premium_per_region, aes(x = "", y = Percentage, fill = Region)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y", start = 0) +
+  labs(
+    title = "Premium Contribution Percentage by Region",
+    fill = "Region"
+  ) +
+  theme_void() +
+  geom_text(
+    aes(label = paste0(round(Percentage, 1), "%")),
+    position = position_stack(vjust = 0.5)
+  ) +
+  scale_fill_brewer(palette = "Set2")
+# Print the premium details
+print(premium_per_region)
+
+# Arrange and display plots
+library(gridExtra)
+grid.arrange(bar_plot, pie_plot, ncol = 2)
+#----------------------------------------------------------------------
+#15% maintenance 30% rcc 15% coastal
+navaldia$Prob_1y<-(1-0.15)*(1-0.15)*navaldia$Prob_1y
+Lyndrassia$Prob_1y<-(1-0.3)*(1-0.15)*Lyndrassia$Prob_1y
+flumvale$Prob_1y<-(1-0.3)*(1-0.15)*flumvale$Prob_1y
+
+#Convert categorical variables to factors
+navaldia$Region <- as.factor(navaldia$Region)
+navaldia$Purpose <- as.factor(navaldia$Purpose)
+navaldia$Hazard <- as.factor(navaldia$Hazard)
+navaldia$Assessment <- as.factor(navaldia$Assessment)
+
+n_simulations <- 1000 # Simulations per trial (for loss values)
+n_trials <- 100 # Number of times we estimate the 95th percentile
+
+#Group dams by region and hazard level
+grouped_data <- navaldia %>%
+  group_by(Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y), # Store probabilities as list
+    loss_given_fail = list(Total.loss), # Store losses as list
+    .groups = 'drop'
+  )
+
+#Function to run one trial of Monte Carlo simulation
+simulate_95th_percentile_trial <- function(prob_fail, loss_given_fail, n_sim) {
+  sim_losses <- numeric(n_sim) # Store total loss for each simulation
+  
+  for (sim in 1:n_sim) {
+    failures <- rbinom(length(prob_fail), size = 1, prob = prob_fail) # Simulate failures (1 = fail, 0 = no fail)
+    total_loss <- sum(failures * loss_given_fail) # Compute total loss for the region-hazard level
+    sim_losses[sim] <- total_loss
+  }
+  
+  return(quantile(sim_losses, 0.95, na.rm = TRUE)) # Return the 95th percentile of total loss
+}
+
+#Apply Monte Carlo simulation to each region-hazard group
+grouped_data$trials_95th <- lapply(1:nrow(grouped_data), function(i) {
+  prob_fail <- unlist(grouped_data$prob_fail[i]) # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data$loss_given_fail[i]) # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+#Compute the mean of the 95th percentiles across trials for each region-hazard group
+grouped_data$xbar_95th <- sapply(grouped_data$trials_95th, mean, na.rm = TRUE)
+
+#Function to perform normality tests for each region-hazard group
+perform_normality_tests <- function( hazard, values) {
+  cat("\nNormality Test for Region:", region, "| Hazard Level:", hazard, "\n")
+  
+  #Shapiro-Wilk test
+  shapiro_result <- shapiro.test(values)
+  print(shapiro_result)
+  
+  #Q-Q plot
+  qqnorm(values, main = paste("Q-Q Plot:", region, "-", hazard))
+  qqline(values, col = "red")
+}
+
+#Ensure region and hazard level are character values
+grouped_data$Region <- as.character(grouped_data$Region)
+grouped_data$Hazard <- as.character(grouped_data$Hazard)
+
+#Apply normality test to each region-hazard level
+for (i in 1:nrow(grouped_data)) {
+  perform_normality_tests(
+    grouped_data$Region[i],
+    grouped_data$Hazard[i],
+    grouped_data$trials_95th[[i]] # 100 values of the 95th percentile
+  )
+}
+
+#View results
+head(grouped_data[, c( "Hazard", "xbar_95th")])
+
+#Load necessary library
+library(dplyr)
+
+#Convert categorical variables to factors
+flumvale$Region <- as.factor(flumvale$Region)
+flumvale$Purpose <- as.factor(flumvale$Purpose)
+flumvale$Hazard <- as.factor(flumvale$Hazard)
+flumvale$Assessment <- as.factor(flumvale$Assessment)
+
+Lyndrassia$Region <- as.factor(Lyndrassia$Region)
+Lyndrassia$Purpose <- as.factor(Lyndrassia$Purpose)
+Lyndrassia$Hazard <- as.factor(Lyndrassia$Hazard)
+Lyndrassia$Assessment <- as.factor(Lyndrassia$Assessment)
+
+
+
+#Group dams by region and hazard level for flumvale
+grouped_data_flumvale <- flumvale %>%
+  group_by(Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y), # Store probabilities as list
+    loss_given_fail = list(Total.loss), # Store losses as list
+    .groups = 'drop'
+  )
+
+#Group dams by region and hazard level for Lyndrassia
+grouped_data_Lyndrassia <- Lyndrassia %>%
+  group_by(Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y), # Store probabilities as list
+    loss_given_fail = list(Total.loss), # Store losses as list
+    .groups = 'drop'
+  )
+
+#Function to run one trial of Monte Carlo simulation
+simulate_95th_percentile_trial <- function(prob_fail, loss_given_fail, n_sim) {
+  sim_losses <- numeric(n_sim) # Store total loss for each simulation
+  
+  for (sim in 1:n_sim) {
+    failures <- rbinom(length(prob_fail), size = 1, prob = prob_fail) # Simulate failures (1 = fail, 0 = no fail)
+    total_loss <- sum(failures * loss_given_fail) # Compute total loss for the region-hazard level
+    sim_losses[sim] <- total_loss
+  }
+  
+  return(quantile(sim_losses, 0.95, na.rm = TRUE)) # Return the 95th percentile of total loss
+}
+
+#Apply Monte Carlo simulation to each region-hazard group for flumvale
+grouped_data_flumvale$trials_95th <- lapply(1:nrow(grouped_data_flumvale), function(i) {
+  prob_fail <- unlist(grouped_data_flumvale$prob_fail[i]) # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data_flumvale$loss_given_fail[i]) # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+#Apply Monte Carlo simulation to each region-hazard group for Lyndrassia
+grouped_data_Lyndrassia$trials_95th <- lapply(1:nrow(grouped_data_Lyndrassia), function(i) {
+  prob_fail <- unlist(grouped_data_Lyndrassia$prob_fail[i]) # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data_Lyndrassia$loss_given_fail[i]) # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+#Compute the mean of the 95th percentiles across trials for each region-hazard group for flumvale
+grouped_data_flumvale$xbar_95th <- sapply(grouped_data_flumvale$trials_95th, mean, na.rm = TRUE)
+
+#Compute the mean of the 95th percentiles across trials for each region-hazard group for Lyndrassia
+grouped_data_Lyndrassia$xbar_95th <- sapply(grouped_data_Lyndrassia$trials_95th, mean, na.rm = TRUE)
+
+#Function to perform normality tests for each region-hazard group
+perform_normality_tests <- function(region, hazard, values) {
+  cat("\nNormality Test for Region:", region, "| Hazard Level:", hazard, "\n")
+  
+  #Shapiro-Wilk test
+  shapiro_result <- shapiro.test(values)
+  print(shapiro_result)
+  
+  #Q-Q plot
+  qqnorm(values, main = paste("Q-Q Plot:", region, "-", hazard))
+  qqline(values, col = "red")
+}
+
+#Ensure region and hazard level are character values for flumvale
+grouped_data_flumvale$Region <- as.character(grouped_data_flumvale$Region)
+grouped_data_flumvale$Hazard <- as.character(grouped_data_flumvale$Hazard)
+
+#Ensure region and hazard level are character values for Lyndrassia
+grouped_data_Lyndrassia$Region <- as.character(grouped_data_Lyndrassia$Region)
+grouped_data_Lyndrassia$Hazard <- as.character(grouped_data_Lyndrassia$Hazard)
+
+#Apply normality test to each region-hazard level for flumvale
+for (i in 1:nrow(grouped_data_flumvale)) {
+  perform_normality_tests(
+    "flumvale",
+    grouped_data_flumvale$Hazard[i],
+    grouped_data_flumvale$trials_95th[[i]] # 100 values of the 95th percentile
+  )
+}
+
+#Apply normality test to each region-hazard level for Lyndrassia
+for (i in 1:nrow(grouped_data_Lyndrassia)) {
+  perform_normality_tests(
+    "Lyndrassia",
+    grouped_data_Lyndrassia$Hazard[i],
+    grouped_data_Lyndrassia$trials_95th[[i]] # 100 values of the 95th percentile
+  )
+}
+
+#View results for flumvale
+head(grouped_data_flumvale[, c("Hazard", "xbar_95th")])
+
+#View results for Lyndrassia
+head(grouped_data_Lyndrassia[, c("Hazard", "xbar_95th")])
+
+##############################################################
+
+#Step 1: Compute Total Premium per Region-Hazard Level
+inflation_rate = 0.02530526
+discount_rate = 0.04943952
+#for navaldia
+grouped_data$Total_Premium <- (grouped_data$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+#For flumvale
+grouped_data_flumvale$Total_Premium <- (grouped_data_flumvale$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+#For Lyndrassia
+grouped_data_Lyndrassia$Total_Premium <- (grouped_data_Lyndrassia$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+#Step 2: Calculate Expected Loss for Each Dam
+navaldia$Expected_Loss <- navaldia$Prob_1y * navaldia$Total.loss
+flumvale$Expected_Loss <- flumvale$Prob_1y * flumvale$Total.loss
+Lyndrassia$Expected_Loss <- Lyndrassia$Prob_1y * Lyndrassia$Total.loss
+navaldia <- merge(navaldia, grouped_data[, c( "Hazard", "Total_Premium")], by = c( "Hazard"))
+
+#Merge region-hazard-level premium into the dam-level dataset for flumvale
+flumvale <- merge(flumvale, grouped_data_flumvale[, c( "Hazard", "Total_Premium")], by = c( "Hazard"))
+
+#Merge region-hazard-level premium into the dam-level dataset for Lyndrassia
+Lyndrassia <- merge(Lyndrassia, grouped_data_Lyndrassia[, c( "Hazard", "Total_Premium")], by = c( "Hazard"))
+
+#Step 3: Compute Total Expected Loss per Region-Hazard Level
+total_expected_loss_navaldia <- aggregate(Expected_Loss ~ Region + Hazard, navaldia, sum)
+colnames(total_expected_loss_navaldia)[3] <- "Total_Expected_Loss"
+
+total_expected_loss_flumvale <- aggregate(Expected_Loss ~ Region + Hazard, flumvale, sum)
+colnames(total_expected_loss_flumvale)[3] <- "Total_Expected_Loss"
+
+total_expected_loss_Lyndrassia <- aggregate(Expected_Loss ~ Region + Hazard, Lyndrassia, sum)
+colnames(total_expected_loss_Lyndrassia)[3] <- "Total_Expected_Loss"
+navaldia <- merge(navaldia, total_expected_loss_navaldia, by = c("Region", "Hazard"))
+
+#Merge total expected loss back into dam_data for flumvale
+flumvale <- merge(flumvale, total_expected_loss_flumvale, by = c("Region", "Hazard"))
+
+#Merge total expected loss back into dam_data for Lyndrassia
+Lyndrassia <- merge(Lyndrassia, total_expected_loss_Lyndrassia, by = c("Region", "Hazard"))
+
+#Step 4: Allocate Premium per Dam Based on Risk Contribution
+navaldia$Premium_per_Dam <- (navaldia$Expected_Loss / navaldia$Total_Expected_Loss) * navaldia$Total_Premium
+flumvale$Premium_per_Dam <- (flumvale$Expected_Loss / flumvale$Total_Expected_Loss) * flumvale$Total_Premium
+Lyndrassia$Premium_per_Dam <- (Lyndrassia$Expected_Loss / Lyndrassia$Total_Expected_Loss) * Lyndrassia$Total_Premium
+
+head(navaldia[, c( "Hazard", "Premium_per_Dam")])
+
+#View final premium allocation for flumvale
+head(flumvale[, c( "Hazard", "Premium_per_Dam")])
+
+#View final premium allocation for Lyndrassia
+head(Lyndrassia[, c( "Hazard", "Premium_per_Dam")])
+
+#Combine all regions into one dataframe
+all_regions <- rbind(navaldia, flumvale, Lyndrassia)
+
+#Calculate total premium across all regions
+total_premium_all_regions <- sum(all_regions$Premium_per_Dam)
+
+#View total premium
+cat("Total Premium Across All Regions:", total_premium_all_regions, "\n")
+
+#Calculate total premium per region
+premium_per_region <- aggregate(Premium_per_Dam ~ Region, all_regions, sum)
+
+#Rename the column for clarity
+colnames(premium_per_region)[2] <- "Total_Premium"
+
+#View the results
+print(premium_per_region)
+
+# Pie Chart
+pie_plot <- ggplot(premium_per_region, aes(x = "", y = Percentage, fill = Region)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y", start = 0) +
+  labs(
+    title = "Premium Contribution Percentage by Region",
+    fill = "Region"
+  ) +
+  theme_void() +
+  geom_text(
+    aes(label = paste0(round(Percentage, 1), "%")),
+    position = position_stack(vjust = 0.5)
+  ) +
+  scale_fill_brewer(palette = "Set2")
+# Print the premium details
+print(premium_per_region)
+
+# Arrange and display plots
+library(gridExtra)
+grid.arrange(bar_plot, pie_plot, ncol = 2)
