@@ -1,0 +1,198 @@
+# Load necessary libraries
+library(readxl)
+library(forecast)
+library(ggplot2)
+library(tseries)
+library(TSA)
+
+# Load the data
+file_path <- "C:/Users/user/OneDrive/Documents/A UPH/SOA STUDY CASE/economic-data-summary (2).xlsx"
+df <- read_excel(file_path, sheet = "Inflation-Interest")
+
+# Convert Year column to numeric
+df$Year <- as.numeric(df$Year)
+
+# Convert the data into time series objects
+inflation_ts <- ts(df$Inflation, start = min(df$Year), frequency = 1)
+riskfree_ts <- ts(df$`1-yr Risk Free Annual Spot Rate`, start = min(df$Year), frequency = 1)
+
+# Plot the data
+plot(inflation_ts, main = "Inflation Rate Over Time", col = "blue")
+plot(riskfree_ts, main = "Risk-Free Interest Rate Over Time", col = "red")
+
+#########################################
+# STATIONARITY TEST
+adf.test(inflation_ts)  # Check if stationary
+adf.test(riskfree_ts)  # Check if stationary
+
+# If not stationary, difference the data
+dy1 <- diff(inflation_ts)
+dy2 <- diff(riskfree_ts)
+
+# Test again
+adf.test(dy1)
+adf.test(dy2)
+
+# Plot differenced series
+plot(dy1, main = "Differenced Inflation Rate", col = "blue")
+plot(dy2, main = "Differenced Risk-Free Rate", col = "red")
+
+acf(dy1) # possible MA(2)
+pacf(dy1) # possible AR(2)
+eacf(dy1)
+# possible models are : ARMA(2,2), ARMA(2,3), ARMA(2,1), ARMA(4,1)
+
+mod1 = arima(dy1,order=c(2,0,2))
+mod2 = arima(dy1,order=c(2,0,3))
+mod3 = arima(dy1,order=c(2,0,1))
+mod4 = arima(dy1,order=c(4,0,1))
+
+mod1$aic
+mod2$aic
+mod3$aic
+mod4$aic
+# mod 3 has the smallest AIC
+mod3
+# best model ARMA(2,1) -> phi1 = 0.3698, phi2 = -0.3415, theta1 = 0.3815
+
+mean(dy1)
+t.test(dy1,mu=0,alternative = "two.sided")
+#p-value>0.05 which means mean = 0
+
+# MODEL DIAGNOSTICS
+res = mod3$residuals
+t.test(res, alternative="two.sided",mu=0)
+# pvalue > 0.05 artinya H0 benar -> mean = 0
+
+acf(res)
+# use Ljung
+# H0: r1e = r2e = .. = 0
+# Ha: at least one j is not 0
+Box.test(res, lag=13, type="Ljung")
+# pvalue = 0.5523 > 0.05 
+
+plot(res)
+abline(0,0,col='red')
+
+# check heteroscedasticity of residue
+McLeod.Li.test(y=res)
+
+# PREDICT / FORECASTING
+dy1_predict = predict(mod3,n.ahead = 20, interval="confidence") # agar ad CI nya
+dy1_predict$pred
+
+y1_pred = df[44:63,2]
+y1_pred[1] = dy1_predict$pred[1] + inflation_ts[63]
+
+
+for (i in 2:20){
+  y1_pred[i] = y1_pred[i-1] + dy1_predict$pred[i]
+}
+y1_pred
+
+fit = arima(inflation_ts, order = c(2, 1, 1))
+pred = predict(fit, n.ahead = 20)
+plot(pred$pred, col="blue", xlab="Year", ylab="Projected Inflation Rate",
+     main="Predicted Inflation Rates for Next 20 Years")
+# Add points to see exact values
+points(pred$pred, col = "darkred", pch = 16)
+#######################################################################
+
+# RISK FREE RATE
+# GARCH MODEL
+library(rugarch)
+# Convert to time series
+riskfree_ts <- ts(df$`1-yr Risk Free Annual Spot Rate`, start = min(df$Year), frequency = 1)
+inflation_ts <- ts(df$Inflation, start = min(df$Year), frequency = 1)
+
+# Take first difference to make it stationary
+d_riskfree <- diff(riskfree_ts)
+d_inflation <- diff(inflation_ts)
+
+# Define GARCH(1,1) model
+spec_riskfree <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                            mean.model = list(armaOrder = c(1,1)),
+                            distribution.model = "std")  # Student-t distribution (more robust)
+
+# Fit GARCH model
+garch_riskfree <- ugarchfit(spec = spec_riskfree, data = d_riskfree)
+
+# Print summary
+print(garch_riskfree)
+
+# Plot standardized residuals
+par(mfrow = c(2,2))
+plot.ts(residuals(garch_riskfree, standardize=TRUE), main="Risk-Free Rate Residuals")
+acf(residuals(garch_riskfree, standardize=TRUE), main="ACF of Residuals")
+qqnorm(residuals(garch_riskfree, standardize=TRUE)); qqline(residuals(garch_riskfree, standardize=TRUE))
+
+# Forecast risk-free rate
+forecast_riskfree <- ugarchforecast(garch_riskfree, n.ahead = 20)
+pred_riskfree <- as.numeric(fitted(forecast_riskfree))
+
+# Generate future years
+future_years <- seq(max(df$Year) + 1, by = 1, length.out = 20)
+pred_riskfree <- as.numeric(fitted(forecast_riskfree))
+
+# Extract differenced predictions
+d_pred_riskfree <- as.numeric(fitted(forecast_riskfree))
+
+# Get the last actual observed risk-free rate
+last_actual_riskfree <- tail(riskfree_ts, 1)
+
+# Convert differenced predictions back to actual rates
+pred_riskfree <- cumsum(c(last_actual_riskfree, d_pred_riskfree))
+pred_riskfree <- pred_riskfree[-1]  # Remove first element to match length
+
+
+# VISUALIZATION
+# Step 1: Combine Historical and Forecasted Data
+years <- seq(from = min(df$Year), to = max(future_years), by = 1)  # Full time period
+
+# Create a data frame for plotting
+plot_data <- data.frame(
+  Year = years,
+  Rate = c(df$`1-yr Risk Free Annual Spot Rate`, pred_riskfree),  # Combine actual + predicted
+  Type = c(rep("Historical", nrow(df)), rep("Forecasted", length(pred_riskfree)))  # Label types
+)
+
+# Step 2: Plot using ggplot2
+ggplot(plot_data, aes(x = Year, y = Rate, color = Type)) +
+  geom_line(size = 1) +  # Line plot
+  geom_point(size = 2) +  # Points for better visualization
+  labs(title = "1-Year Risk-Free Interest Rate (1962 - Forecasted Years)",
+       x = "Year", y = "Interest Rate (%)") +
+  scale_color_manual(values = c("Historical" = "black", "Forecasted" = "blue")) +
+  theme_minimal()
+
+
+last_year <- max(df$Year)
+future_years <- seq(last_year + 1, by = 1, length.out = 20)
+
+# Plot the predicted risk-free rates
+plot(future_years, pred_riskfree, type = "l", col = "blue", lwd = 2,
+     xlab = "Year", ylab = "Predicted 1-Year Risk-Free Rate",
+     main = "Predicted Risk-Free Annual Spot Rates for Next 20 Years")
+
+# Add points to see exact values
+points(future_years, pred_riskfree, col = "darkred", pch = 16)
+
+###################################################
+# residual analysis / model diagnostics
+# Extract residuals
+garch_residuals <- residuals(garch_riskfree, standardize = TRUE)
+
+# Plot residuals
+plot(garch_residuals, type = "l", main = "Standardized Residuals of GARCH Model")
+abline(h = 0, col = "red")
+
+# Ljung-Box test for autocorrelation
+Box.test(garch_residuals, lag = 10, type = "Ljung-Box")
+
+library(FinTS)  # Load FinTS package
+
+# ARCH-LM test
+ArchTest(garch_residuals, lags = 10)
+# Jarque-Bera test
+jarque.bera.test(garch_residuals)
+# all p-value > 0.05
