@@ -1,0 +1,155 @@
+library(dplyr)
+set.seed(123)
+data = read.csv("C:/Users/user/OneDrive/Documents/A UPH/SOA STUDY CASE/dam_data.csv")
+
+# Convert the 10-year probability of failure to the 1-year probability using the formula
+data$Prob_1y <- 1 - (1-data$Prob_Fail)^(1/10)
+# Convert categorical variables to factors
+data$Region <- as.factor(data$Region)
+data$Purpose <- as.factor(data$Purpose)
+data$Hazard <- as.factor(data$Hazard)
+data$Assessment <- as.factor(data$Assessment)
+
+#################################################################
+# change "undetermined" hazard to the median value of hazard
+
+# Convert hazard levels into numeric values
+hazard_levels <- c("Low" = 1, "Significant" = 2, "High" = 3)
+data$hazard_numeric <- as.numeric(hazard_levels[data$Hazard])
+
+# Compute median hazard (ignoring "Undetermined")
+median_hazard_numeric <- median(data$hazard_numeric, na.rm = TRUE)
+
+# Convert median numeric back to category
+median_hazard_category <- names(hazard_levels)[which(hazard_levels == median_hazard_numeric)]
+
+# Replace "Undetermined" with median category
+data$Hazard <- ifelse(data$Hazard == "Undetermined", median_hazard_category, data$Hazard)
+
+# Remove temporary numeric column
+data$hazard_numeric <- NULL
+###########################################################################
+# premium calculation
+n_simulations <- 1000  # Simulations per trial (for loss values)
+n_trials <- 100  # Number of times we estimate the 80th percentile
+
+
+# Ensure required columns exist
+required_cols <- c("Region", "Hazard", "Prob_1y", "Total.loss")
+if (!all(required_cols %in% colnames(data))) {
+  stop("Missing required columns in the dataset.")
+}
+
+# Group dams by region and hazard level
+grouped_data <- data %>%
+  group_by(Region, Hazard) %>%
+  summarise(
+    num_dams = n(),
+    prob_fail = list(Prob_1y),  # Store probabilities  as list
+    loss_given_fail = list(Total.loss),  # Store losses as list
+    .groups = 'drop'
+  )
+
+# Function to run one trial of Monte Carlo simulation
+simulate_95th_percentile_trial <- function(prob_fail, loss_given_fail, n_sim) {
+  sim_losses <- numeric(n_sim)  # Store total loss for each simulation
+  
+  for (sim in 1:n_sim) {
+    failures <- rbinom(length(prob_fail), size = 1, prob = prob_fail)  # Simulate failures (1 = fail, 0 = no fail)
+    total_loss <- sum(failures * loss_given_fail)  # Compute total loss for the region-hazard level
+    sim_losses[sim] <- total_loss
+  }
+
+  return(quantile(sim_losses, 0.95, na.rm = TRUE))  # Return the 95th percentile of total loss
+}
+
+# Apply Monte Carlo simulation to each region-hazard group
+grouped_data$trials_95th <- lapply(1:nrow(grouped_data), function(i) {
+  prob_fail <- unlist(grouped_data$prob_fail[i])  # Extract probability failure values
+  loss_given_fail <- unlist(grouped_data$loss_given_fail[i])  # Extract loss values
+  
+  replicate(n_trials, simulate_95th_percentile_trial(prob_fail, loss_given_fail, n_simulations))
+})
+
+# Compute the mean of the 80th percentiles across trials for each region-hazard group
+grouped_data$xbar_95th <- sapply(grouped_data$trials_95th, mean, na.rm = TRUE)
+grouped_data$sd_95th <- sapply(grouped_data$trials_95th, sd, na.rm = TRUE)
+
+# Function to perform normality tests for each region-hazard group
+perform_normality_tests <- function(region, hazard, values) {
+  cat("\nNormality Test for Region:", region, "| Hazard Level:", hazard, "\n")
+  
+  # Compute mean and standard deviation for the group
+  mean_val <- mean(values, na.rm = TRUE)
+  sd_val <- sd(values, na.rm = TRUE)
+  
+  # KS-test
+  ks_test <- ks.test(values, "pnorm", mean = mean_val, sd = sd_val)
+  
+  print(ks_test)  # Print test results
+  return(ks_test$p.value)  # Return p-value for interpretation
+}
+
+# Ensure region and hazard level are character values
+grouped_data$Region <- as.character(grouped_data$Region)
+grouped_data$Hazard <- as.character(grouped_data$Hazard)
+
+# Apply normality test to each region-hazard level
+grouped_data$KS_p_value <- sapply(1:nrow(grouped_data), function(i) {
+  perform_normality_tests(
+    grouped_data$Region[i],
+    grouped_data$Hazard[i],
+    grouped_data$trials_95th[[i]]  # 100 values of the 95th percentile
+  )
+})
+
+# View results
+head(grouped_data[, c("Region", "Hazard", "xbar_95th", "KS_p_value")])
+
+
+##############################################################
+# Step 1: Compute Total Premium per Region-Hazard Level
+inflation_rate = 0.02530526 # from projected inflation rate
+discount_rate = 0.04943952 # from projected risk free interest rate
+grouped_data$Total_Premium <- (grouped_data$xbar_95th * (1 + inflation_rate)) / (1 + discount_rate)
+
+# Step 2: Calculate Expected Loss for Each Dam
+data$Expected_Loss <- data$Prob_1y * data$Total.loss
+
+# Merge region-hazard-level premium into the dam-level dataset
+data <- merge(data, grouped_data[, c("Region", "Hazard", "Total_Premium")], by = c("Region", "Hazard"))
+
+# Step 3: Compute Total Expected Loss per Region-Hazard Level
+total_expected_loss <- aggregate(Expected_Loss ~ Region + Hazard, data, sum)
+colnames(total_expected_loss)[3] <- "Total_Expected_Loss"
+
+# Merge total expected loss back into dam_data
+data <- merge(data, total_expected_loss, by = c("Region", "Hazard"))
+
+# Step 4: Allocate Premium per Dam Based on Risk Contribution
+data$Premium_per_Dam <- (data$Expected_Loss / data$Total_Expected_Loss) * data$Total_Premium
+
+# View final premium allocation
+head(data[, c("Region", "Hazard", "Premium_per_Dam")])
+
+write.csv(data, "C:/Users/user/OneDrive/Documents/A UPH/SOA STUDY CASE/dam_premium.csv", row.names = FALSE)
+
+library(ggplot2)
+library(dplyr)
+
+# Aggregate total premium by region
+premium_by_region <- data %>%
+  group_by(Region) %>%
+  summarise(Total_Premium_Collected = sum(Premium_per_Dam, na.rm = TRUE))
+
+# Create the bar chart
+ggplot(premium_by_region, aes(x = reorder(Region, -Total_Premium_Collected), y = Total_Premium_Collected, fill = Region)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Total Premium Collected by Region",
+    x = "Region",
+    y = "Total Premium Collected (in Qm)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none") +  # Remove legend since color is just for visualization
+  geom_text(aes(label = round(Total_Premium_Collected, 2)), vjust = -0.5)  # Add labels on bars
